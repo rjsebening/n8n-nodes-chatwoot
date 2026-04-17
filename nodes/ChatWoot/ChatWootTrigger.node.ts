@@ -238,9 +238,43 @@ function getWebhookEndpoint(this: WebhookCleanupContext): string {
 	return `/api/v1/accounts/${accountId}/webhooks`;
 }
 
+function extractWebhookList(response: unknown): ChatWootWebhook[] {
+	if (Array.isArray(response)) return response as ChatWootWebhook[];
+	if (!response || typeof response !== 'object') return [];
+
+	const visited = new Set<unknown>();
+	const queue: unknown[] = [response];
+
+	while (queue.length > 0) {
+		const current = queue.shift();
+		if (!current || typeof current !== 'object' || visited.has(current)) continue;
+		visited.add(current);
+
+		if (Array.isArray(current)) {
+			if (
+				current.length === 0 ||
+				current.every(
+					(item) =>
+						item && typeof item === 'object' && 'id' in (item as Record<string, unknown>),
+				)
+			) {
+				return current as ChatWootWebhook[];
+			}
+			continue;
+		}
+
+		for (const key of ['payload', 'data', 'webhooks', 'items', 'results']) {
+			const value = (current as Record<string, unknown>)[key];
+			if (value !== undefined) queue.push(value);
+		}
+	}
+
+	return [];
+}
+
 async function getRemoteWebhooks(this: WebhookCleanupContext): Promise<ChatWootWebhook[]> {
 	const response = await chatwootApiRequest.call(this, 'GET', getWebhookEndpoint.call(this));
-	return Array.isArray(response) ? (response as ChatWootWebhook[]) : [];
+	return extractWebhookList(response);
 }
 
 async function deleteWebhooksByUrl(this: WebhookCleanupContext): Promise<void> {
