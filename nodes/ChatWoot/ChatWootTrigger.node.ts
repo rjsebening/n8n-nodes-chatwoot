@@ -8,6 +8,8 @@ import type {
 	IWebhookResponseData,
 	JsonObject,
 } from 'n8n-workflow';
+
+type WebhookCleanupContext = IHookFunctions | IWebhookFunctions;
 import { NodeApiError, NodeConnectionTypes, NodeOperationError } from 'n8n-workflow';
 
 type ChatWootWebhook = {
@@ -141,6 +143,18 @@ export class ChatWootTrigger implements INodeType {
 		const selectedEvents = normalizeEvents(this.getNodeParameter('events', []) as string[]);
 		const event = String((body as IDataObject).event ?? (body as IDataObject).event_name ?? '');
 
+		if (this.getMode() === 'manual') {
+			try {
+				await cleanupWebhooksByUrl.call(this);
+			} catch (error) {
+				this.logger.warn('ChatWoot trigger: failed to clean up test webhook after payload', {
+					file: 'ChatWootTrigger.node.ts',
+					function: 'webhook',
+					error,
+				});
+			}
+		}
+
 		if (selectedEvents.length > 0 && event && !selectedEvents.includes(event)) {
 			return {
 				webhookResponse: { ok: true, ignored: true },
@@ -272,7 +286,7 @@ function toJsonObject(
 }
 
 async function chatwootApiRequest(
-	this: IHookFunctions,
+	this: WebhookCleanupContext,
 	method: IHttpRequestOptions['method'],
 	endpoint: string,
 	body?: IDataObject,
@@ -375,12 +389,12 @@ async function chatwootApiRequest(
 	}
 }
 
-function getWebhookEndpoint(this: IHookFunctions): string {
+function getWebhookEndpoint(this: WebhookCleanupContext): string {
 	const accountId = this.getNodeParameter('account_id') as number;
 	return `/api/v1/accounts/${accountId}/webhooks`;
 }
 
-async function getRemoteWebhooks(this: IHookFunctions): Promise<ChatWootWebhook[]> {
+async function getRemoteWebhooks(this: WebhookCleanupContext): Promise<ChatWootWebhook[]> {
 	const response = await chatwootApiRequest.call(this, 'GET', getWebhookEndpoint.call(this));
 
 	return Array.isArray(response) ? (response as ChatWootWebhook[]) : [];
@@ -457,10 +471,36 @@ async function create(this: IHookFunctions): Promise<boolean> {
 	return true;
 }
 
+function normalizeUrl(url: string | null | undefined): string {
+	return String(url ?? '')
+		.trim()
+		.replace(/\/+$/, '');
+}
+
+async function cleanupWebhooksByUrl(this: WebhookCleanupContext): Promise<void> {
+	const webhookUrl = this.getNodeWebhookUrl('default');
+	if (!webhookUrl) return;
+
+	const endpoint = getWebhookEndpoint.call(this);
+	const targetUrl = normalizeUrl(webhookUrl);
+	const remoteWebhooks = await getRemoteWebhooks.call(this);
+
+	for (const webhook of remoteWebhooks.filter(
+		(remoteWebhook) => normalizeUrl(remoteWebhook.url) === targetUrl,
+	)) {
+		try {
+			await chatwootApiRequest.call(this, 'DELETE', `${endpoint}/${webhook.id}`);
+		} catch (error) {
+			if (!isNotFoundError(error)) {
+				throw error;
+			}
+		}
+	}
+}
+
 async function deleteWebhook(this: IHookFunctions): Promise<boolean> {
 	const webhookData = this.getWorkflowStaticData('node');
 	const endpoint = getWebhookEndpoint.call(this);
-	const webhookUrl = this.getNodeWebhookUrl('default');
 	const webhookId = webhookData.webhookId ? Number(webhookData.webhookId) : undefined;
 
 	if (webhookId) {
@@ -475,21 +515,7 @@ async function deleteWebhook(this: IHookFunctions): Promise<boolean> {
 		delete webhookData.webhookId;
 	}
 
-	if (webhookUrl) {
-		const remoteWebhooks = await getRemoteWebhooks.call(this);
-
-		for (const webhook of remoteWebhooks.filter(
-			(remoteWebhook) => remoteWebhook.url === webhookUrl,
-		)) {
-			try {
-				await chatwootApiRequest.call(this, 'DELETE', `${endpoint}/${webhook.id}`);
-			} catch (error) {
-				if (!isNotFoundError(error)) {
-					throw error;
-				}
-			}
-		}
-	}
+	await cleanupWebhooksByUrl.call(this);
 
 	delete webhookData.webhookId;
 
