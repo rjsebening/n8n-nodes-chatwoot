@@ -1,4 +1,4 @@
-import type {
+import {
 	IDataObject,
 	IHookFunctions,
 	IHttpRequestOptions,
@@ -7,10 +7,10 @@ import type {
 	IWebhookFunctions,
 	IWebhookResponseData,
 	JsonObject,
+	NodeApiError,
+	NodeConnectionTypes,
+	NodeOperationError,
 } from 'n8n-workflow';
-
-type WebhookCleanupContext = IHookFunctions | IWebhookFunctions;
-import { NodeApiError, NodeConnectionTypes, NodeOperationError } from 'n8n-workflow';
 
 type ChatWootWebhook = {
 	id: number;
@@ -18,6 +18,29 @@ type ChatWootWebhook = {
 	name?: string;
 	subscriptions?: string[];
 	account_id?: number;
+};
+
+type WebhookCleanupContext = IHookFunctions | IWebhookFunctions;
+
+type HttpRequestError = {
+	message?: string;
+	status?: number;
+	statusCode?: number;
+	code?: string;
+	response?: {
+		status?: number;
+		statusCode?: number;
+		data?: unknown;
+		body?: unknown;
+	};
+	error?: unknown;
+};
+
+type FullHttpResponse = {
+	status?: number;
+	statusCode?: number;
+	body?: unknown;
+	data?: unknown;
 };
 
 const webhookEvents = [
@@ -30,6 +53,214 @@ const webhookEvents = [
 	'message_updated',
 	'webwidget_triggered',
 ];
+
+function normalizeEvents(events: string[]): string[] {
+	const validEvents = events.filter((event) => webhookEvents.includes(event));
+	return [...new Set(validEvents.length ? validEvents : webhookEvents)].sort();
+}
+
+function subscriptionsMatch(left: string[] = [], right: string[] = []): boolean {
+	const normalizedLeft = normalizeEvents(left);
+	const normalizedRight = normalizeEvents(right);
+	return (
+		normalizedLeft.length === normalizedRight.length &&
+		normalizedLeft.every((event, index) => event === normalizedRight[index])
+	);
+}
+
+function normalizeUrl(url: string | null | undefined): string {
+	return String(url ?? '')
+		.trim()
+		.replace(/\/+$/, '');
+}
+
+function stringifyForDescription(value: unknown): string {
+	if (value === undefined || value === null || value === '') return '';
+	if (typeof value === 'string') return value;
+	try {
+		return JSON.stringify(value);
+	} catch {
+		return String(value);
+	}
+}
+
+function getRequestStatusCode(error: HttpRequestError): string | undefined {
+	const statusCode =
+		error.response?.statusCode ?? error.response?.status ?? error.statusCode ?? error.status;
+	return statusCode === undefined ? undefined : String(statusCode);
+}
+
+function getResponseBody(error: HttpRequestError): unknown {
+	return error.response?.data ?? error.response?.body ?? error.error;
+}
+
+function getFullResponseBody(response: FullHttpResponse): unknown {
+	return response.body ?? response.data;
+}
+
+function getFullResponseStatusCode(response: FullHttpResponse): number | undefined {
+	return response.statusCode ?? response.status;
+}
+
+function isNotFoundError(error: unknown): boolean {
+	const requestError = error as {
+		httpCode?: string | null;
+		status?: number;
+		statusCode?: number;
+		response?: { status?: number; statusCode?: number };
+	};
+	return (
+		requestError.httpCode === '404' ||
+		requestError.statusCode === 404 ||
+		requestError.status === 404 ||
+		requestError.response?.statusCode === 404 ||
+		requestError.response?.status === 404
+	);
+}
+
+function toJsonObject(
+	error: HttpRequestError,
+	statusCode?: string,
+	responseBody?: unknown,
+): JsonObject {
+	return {
+		...error,
+		message: error.message ?? `ChatWoot API request failed with status code ${statusCode}`,
+		response: {
+			...(error.response ?? {}),
+			status: statusCode ? Number(statusCode) : error.response?.status,
+			statusCode: statusCode ? Number(statusCode) : error.response?.statusCode,
+			data: responseBody ?? error.response?.data,
+		},
+	} as JsonObject;
+}
+
+async function chatwootApiRequest(
+	this: WebhookCleanupContext,
+	method: IHttpRequestOptions['method'],
+	endpoint: string,
+	body?: IDataObject,
+): Promise<IDataObject | ChatWootWebhook[]> {
+	const credentials = await this.getCredentials<{ url: string; accessToken: string }>(
+		'chatwootApplicationApi',
+	);
+	const baseURL = String(credentials.url ?? '').replace(/\/$/, '');
+
+	if (!/^https?:\/\//i.test(baseURL)) {
+		throw new NodeOperationError(this.getNode(), 'Invalid ChatWoot URL in credentials');
+	}
+
+	try {
+		const response = (await this.helpers.httpRequestWithAuthentication.call(
+			this,
+			'chatwootApplicationApi',
+			{
+				method,
+				baseURL,
+				url: endpoint,
+				headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+				body,
+				json: true,
+				ignoreHttpStatusErrors: true,
+				returnFullResponse: true,
+			},
+		)) as FullHttpResponse;
+
+		const responseStatusCode = getFullResponseStatusCode(response);
+		const responseBody = getFullResponseBody(response);
+
+		if (responseStatusCode && responseStatusCode >= 400) {
+			const statusCode = String(responseStatusCode);
+			const responseDescription = stringifyForDescription(responseBody);
+			const requestDescription = body ? ` Request body: ${stringifyForDescription(body)}` : '';
+			const description = [
+				`ChatWoot request: ${method} ${endpoint}.`,
+				responseDescription ? `Response body: ${responseDescription}` : undefined,
+				requestDescription,
+			]
+				.filter(Boolean)
+				.join(' ');
+
+			this.logger.error(`ChatWoot trigger API request failed: ${method} ${endpoint}`, {
+				file: 'ChatWootTrigger.node.ts',
+				function: 'chatwootApiRequest',
+				statusCode,
+				endpoint,
+				method,
+				responseBody,
+				requestBody: body,
+			});
+
+			throw new NodeApiError(this.getNode(), toJsonObject({}, statusCode, responseBody), {
+				message: `ChatWoot API request failed: ${method} ${endpoint}`,
+				description,
+				httpCode: statusCode,
+			});
+		}
+
+		return responseBody as IDataObject | ChatWootWebhook[];
+	} catch (error) {
+		if (error instanceof NodeApiError) throw error;
+
+		const requestError = error as HttpRequestError;
+		const responseBody = getResponseBody(requestError);
+		const responseDescription = stringifyForDescription(responseBody);
+		const requestDescription = body ? ` Request body: ${stringifyForDescription(body)}` : '';
+		const description = [
+			`ChatWoot request: ${method} ${endpoint}.`,
+			responseDescription ? `Response body: ${responseDescription}` : requestError.message,
+			requestDescription,
+		]
+			.filter(Boolean)
+			.join(' ');
+		const statusCode = getRequestStatusCode(requestError);
+
+		this.logger.error(`ChatWoot trigger API request failed: ${method} ${endpoint}`, {
+			file: 'ChatWootTrigger.node.ts',
+			function: 'chatwootApiRequest',
+			statusCode,
+			endpoint,
+			method,
+			responseBody,
+			requestBody: body,
+		});
+
+		throw new NodeApiError(this.getNode(), toJsonObject(requestError, statusCode, responseBody), {
+			message: `ChatWoot API request failed: ${method} ${endpoint}`,
+			description,
+			httpCode: statusCode,
+		});
+	}
+}
+
+function getWebhookEndpoint(this: WebhookCleanupContext): string {
+	const accountId = this.getNodeParameter('account_id') as number;
+	return `/api/v1/accounts/${accountId}/webhooks`;
+}
+
+async function getRemoteWebhooks(this: WebhookCleanupContext): Promise<ChatWootWebhook[]> {
+	const response = await chatwootApiRequest.call(this, 'GET', getWebhookEndpoint.call(this));
+	return Array.isArray(response) ? (response as ChatWootWebhook[]) : [];
+}
+
+async function deleteWebhooksByUrl(this: WebhookCleanupContext): Promise<void> {
+	const webhookUrl = this.getNodeWebhookUrl('default');
+	if (!webhookUrl) return;
+
+	const endpoint = getWebhookEndpoint.call(this);
+	const targetUrl = normalizeUrl(webhookUrl);
+	const remoteWebhooks = await getRemoteWebhooks.call(this);
+
+	for (const webhook of remoteWebhooks.filter(
+		(remoteWebhook) => normalizeUrl(remoteWebhook.url) === targetUrl,
+	)) {
+		try {
+			await chatwootApiRequest.call(this, 'DELETE', `${endpoint}/${webhook.id}`);
+		} catch (error) {
+			if (!isNotFoundError(error)) throw error;
+		}
+	}
+}
 
 export class ChatWootTrigger implements INodeType {
 	description: INodeTypeDescription = {
@@ -50,7 +281,6 @@ export class ChatWootTrigger implements INodeType {
 				name: 'default',
 				httpMethod: 'POST',
 				responseMode: 'onReceived',
-				responseData: 'firstEntryJson',
 				isFullPath: true,
 				path: '',
 			},
@@ -138,388 +368,113 @@ export class ChatWootTrigger implements INodeType {
 		usableAsTool: true,
 	};
 
-	async webhook(this: IWebhookFunctions): Promise<IWebhookResponseData> {
-		const body = this.getBodyData();
-		const selectedEvents = normalizeEvents(this.getNodeParameter('events', []) as string[]);
-		const event = String((body as IDataObject).event ?? (body as IDataObject).event_name ?? '');
-
-		if (this.getMode() === 'manual') {
-			try {
-				await cleanupWebhooksByUrl.call(this);
-			} catch (error) {
-				this.logger.warn('ChatWoot trigger: failed to clean up test webhook after payload', {
-					file: 'ChatWootTrigger.node.ts',
-					function: 'webhook',
-					error,
-				});
-			}
-		}
-
-		if (selectedEvents.length > 0 && event && !selectedEvents.includes(event)) {
-			return {
-				webhookResponse: { ok: true, ignored: true },
-			};
-		}
-
-		return {
-			webhookResponse: { ok: true },
-			workflowData: [[{ json: body }]],
-		};
-	}
-
 	webhookMethods = {
 		default: {
-			checkExists,
-			create,
-			delete: deleteWebhook,
-		},
-	};
-}
+			async checkExists(this: IHookFunctions): Promise<boolean> {
+				const webhookUrl = this.getNodeWebhookUrl('default');
+				if (!webhookUrl) return false;
 
-function normalizeEvents(events: string[]): string[] {
-	const validEvents = events.filter((event) => webhookEvents.includes(event));
+				const webhookData = this.getWorkflowStaticData('node');
+				const selectedEvents = normalizeEvents(
+					this.getNodeParameter('events', []) as string[],
+				);
+				const targetUrl = normalizeUrl(webhookUrl);
+				const remoteWebhooks = await getRemoteWebhooks.call(this);
+				const storedId = webhookData.webhookId ? Number(webhookData.webhookId) : undefined;
 
-	return [...new Set(validEvents.length ? validEvents : webhookEvents)].sort();
-}
+				const existingWebhook =
+					(storedId && remoteWebhooks.find((webhook) => webhook.id === storedId)) ||
+					remoteWebhooks.find(
+						(webhook) =>
+							normalizeUrl(webhook.url) === targetUrl &&
+							subscriptionsMatch(webhook.subscriptions, selectedEvents),
+					);
 
-function subscriptionsMatch(left: string[] = [], right: string[] = []): boolean {
-	const normalizedLeft = normalizeEvents(left);
-	const normalizedRight = normalizeEvents(right);
+				if (!existingWebhook) {
+					delete webhookData.webhookId;
+					return false;
+				}
 
-	return (
-		normalizedLeft.length === normalizedRight.length &&
-		normalizedLeft.every((event, index) => event === normalizedRight[index])
-	);
-}
+				webhookData.webhookId = existingWebhook.id;
 
-type HttpRequestError = {
-	message?: string;
-	status?: number;
-	statusCode?: number;
-	code?: string;
-	response?: {
-		status?: number;
-		statusCode?: number;
-		data?: unknown;
-		body?: unknown;
-	};
-	error?: unknown;
-};
-
-type FullHttpResponse = {
-	status?: number;
-	statusCode?: number;
-	body?: unknown;
-	data?: unknown;
-};
-
-function stringifyForDescription(value: unknown): string {
-	if (value === undefined || value === null || value === '') {
-		return '';
-	}
-
-	if (typeof value === 'string') {
-		return value;
-	}
-
-	try {
-		return JSON.stringify(value);
-	} catch {
-		return String(value);
-	}
-}
-
-function getRequestStatusCode(error: HttpRequestError): string | undefined {
-	const statusCode =
-		error.response?.statusCode ?? error.response?.status ?? error.statusCode ?? error.status;
-
-	return statusCode === undefined ? undefined : String(statusCode);
-}
-
-function getResponseBody(error: HttpRequestError): unknown {
-	return error.response?.data ?? error.response?.body ?? error.error;
-}
-
-function getFullResponseBody(response: FullHttpResponse): unknown {
-	return response.body ?? response.data;
-}
-
-function getFullResponseStatusCode(response: FullHttpResponse): number | undefined {
-	return response.statusCode ?? response.status;
-}
-
-function isNotFoundError(error: unknown): boolean {
-	const requestError = error as {
-		httpCode?: string | null;
-		status?: number;
-		statusCode?: number;
-		response?: {
-			status?: number;
-			statusCode?: number;
-		};
-	};
-
-	return (
-		requestError.httpCode === '404' ||
-		requestError.statusCode === 404 ||
-		requestError.status === 404 ||
-		requestError.response?.statusCode === 404 ||
-		requestError.response?.status === 404
-	);
-}
-
-function toJsonObject(
-	error: HttpRequestError,
-	statusCode?: string,
-	responseBody?: unknown,
-): JsonObject {
-	return {
-		...error,
-		message: error.message ?? `ChatWoot API request failed with status code ${statusCode}`,
-		response: {
-			...(error.response ?? {}),
-			status: statusCode ? Number(statusCode) : error.response?.status,
-			statusCode: statusCode ? Number(statusCode) : error.response?.statusCode,
-			data: responseBody ?? error.response?.data,
-		},
-	} as JsonObject;
-}
-
-async function chatwootApiRequest(
-	this: WebhookCleanupContext,
-	method: IHttpRequestOptions['method'],
-	endpoint: string,
-	body?: IDataObject,
-): Promise<IDataObject | ChatWootWebhook[]> {
-	const credentials = await this.getCredentials<{
-		url: string;
-		accessToken: string;
-	}>('chatwootApplicationApi');
-	const baseURL = String(credentials.url ?? '').replace(/\/$/, '');
-
-	if (!/^https?:\/\//i.test(baseURL)) {
-		throw new NodeOperationError(this.getNode(), 'Invalid ChatWoot URL in credentials');
-	}
-
-	try {
-		const response = (await this.helpers.httpRequestWithAuthentication.call(
-			this,
-			'chatwootApplicationApi',
-			{
-				method,
-				baseURL,
-				url: endpoint,
-				headers: {
-					Accept: 'application/json',
-					'Content-Type': 'application/json',
-				},
-				body,
-				json: true,
-				ignoreHttpStatusErrors: true,
-				returnFullResponse: true,
+				return (
+					normalizeUrl(existingWebhook.url) === targetUrl &&
+					subscriptionsMatch(existingWebhook.subscriptions, selectedEvents)
+				);
 			},
-		)) as FullHttpResponse;
 
-		const responseStatusCode = getFullResponseStatusCode(response);
-		const responseBody = getFullResponseBody(response);
+			async create(this: IHookFunctions): Promise<boolean> {
+				const webhookUrl = this.getNodeWebhookUrl('default');
+				if (!webhookUrl) return false;
 
-		if (responseStatusCode && responseStatusCode >= 400) {
-			const statusCode = String(responseStatusCode);
-			const responseDescription = stringifyForDescription(responseBody);
-			const requestDescription = body ? ` Request body: ${stringifyForDescription(body)}` : '';
-			const description = [
-				`ChatWoot request: ${method} ${endpoint}.`,
-				responseDescription ? `Response body: ${responseDescription}` : undefined,
-				requestDescription,
-			]
-				.filter(Boolean)
-				.join(' ');
+				const webhookData = this.getWorkflowStaticData('node');
+				const webhookName = this.getNodeParameter(
+					'webhookName',
+					'n8n ChatWoot Trigger',
+				) as string;
+				const selectedEvents = normalizeEvents(
+					this.getNodeParameter('events', []) as string[],
+				);
+				const endpoint = getWebhookEndpoint.call(this);
 
-			this.logger.error(`ChatWoot trigger API request failed: ${method} ${endpoint}`, {
-				file: 'ChatWootTrigger.node.ts',
-				function: 'chatwootApiRequest',
-				statusCode,
-				endpoint,
-				method,
-				responseBody,
-				requestBody: body,
-			});
+				await deleteWebhooksByUrl.call(this);
 
-			throw new NodeApiError(this.getNode(), toJsonObject({}, statusCode, responseBody), {
-				message: `ChatWoot API request failed: ${method} ${endpoint}`,
-				description,
-				httpCode: statusCode,
-			});
-		}
+				const response = (await chatwootApiRequest.call(this, 'POST', endpoint, {
+					url: webhookUrl,
+					name: webhookName,
+					subscriptions: selectedEvents,
+				})) as IDataObject;
 
-		return responseBody as IDataObject | ChatWootWebhook[];
-	} catch (error) {
-		if (error instanceof NodeApiError) {
-			throw error;
-		}
+				if (!response?.id) return false;
 
-		const requestError = error as HttpRequestError;
-		const responseBody = getResponseBody(requestError);
-		const responseDescription = stringifyForDescription(responseBody);
-		const requestDescription = body ? ` Request body: ${stringifyForDescription(body)}` : '';
-		const description = [
-			`ChatWoot request: ${method} ${endpoint}.`,
-			responseDescription ? `Response body: ${responseDescription}` : requestError.message,
-			requestDescription,
-		]
-			.filter(Boolean)
-			.join(' ');
-		const statusCode = getRequestStatusCode(requestError);
+				webhookData.webhookId = response.id;
+				return true;
+			},
 
-		this.logger.error(`ChatWoot trigger API request failed: ${method} ${endpoint}`, {
-			file: 'ChatWootTrigger.node.ts',
-			function: 'chatwootApiRequest',
-			statusCode,
-			endpoint,
-			method,
-			responseBody,
-			requestBody: body,
-		});
+			async delete(this: IHookFunctions): Promise<boolean> {
+				const webhookData = this.getWorkflowStaticData('node');
+				const endpoint = getWebhookEndpoint.call(this);
+				const webhookId = webhookData.webhookId
+					? Number(webhookData.webhookId)
+					: undefined;
 
-		throw new NodeApiError(this.getNode(), toJsonObject(requestError, statusCode, responseBody), {
-			message: `ChatWoot API request failed: ${method} ${endpoint}`,
-			description,
-			httpCode: statusCode,
-		});
-	}
-}
+				if (webhookId) {
+					try {
+						await chatwootApiRequest.call(this, 'DELETE', `${endpoint}/${webhookId}`);
+					} catch (error) {
+						if (!isNotFoundError(error)) throw error;
+					}
+				}
 
-function getWebhookEndpoint(this: WebhookCleanupContext): string {
-	const accountId = this.getNodeParameter('account_id') as number;
-	return `/api/v1/accounts/${accountId}/webhooks`;
-}
+				try {
+					await deleteWebhooksByUrl.call(this);
+				} catch (error) {
+					if (!isNotFoundError(error)) throw error;
+				}
 
-async function getRemoteWebhooks(this: WebhookCleanupContext): Promise<ChatWootWebhook[]> {
-	const response = await chatwootApiRequest.call(this, 'GET', getWebhookEndpoint.call(this));
+				delete webhookData.webhookId;
+				return true;
+			},
+		},
+	};
 
-	return Array.isArray(response) ? (response as ChatWootWebhook[]) : [];
-}
-
-async function checkExists(this: IHookFunctions): Promise<boolean> {
-	const webhookUrl = this.getNodeWebhookUrl('default');
-
-	if (!webhookUrl) {
-		return false;
-	}
-
-	const webhookData = this.getWorkflowStaticData('node');
-	const selectedEvents = normalizeEvents(this.getNodeParameter('events', []) as string[]);
-	const remoteWebhooks = await getRemoteWebhooks.call(this);
-	const webhookId = webhookData.webhookId ? Number(webhookData.webhookId) : undefined;
-
-	const existingWebhook =
-		(webhookId && remoteWebhooks.find((webhook) => webhook.id === webhookId)) ||
-		remoteWebhooks.find(
-			(webhook) =>
-				webhook.url === webhookUrl && subscriptionsMatch(webhook.subscriptions, selectedEvents),
+	async webhook(this: IWebhookFunctions): Promise<IWebhookResponseData> {
+		const body = this.getBodyData() as unknown;
+		const selectedEvents = normalizeEvents(this.getNodeParameter('events', []) as string[]);
+		const event = String(
+			(body as IDataObject)?.event ?? (body as IDataObject)?.event_name ?? '',
 		);
 
-	if (!existingWebhook) {
-		return false;
-	}
-
-	webhookData.webhookId = existingWebhook.id;
-
-	return (
-		existingWebhook.url === webhookUrl &&
-		subscriptionsMatch(existingWebhook.subscriptions, selectedEvents)
-	);
-}
-
-async function create(this: IHookFunctions): Promise<boolean> {
-	const webhookUrl = this.getNodeWebhookUrl('default');
-
-	if (!webhookUrl) {
-		return false;
-	}
-
-	const webhookData = this.getWorkflowStaticData('node');
-	const webhookName = this.getNodeParameter('webhookName', 'n8n ChatWoot Trigger') as string;
-	const selectedEvents = normalizeEvents(this.getNodeParameter('events', []) as string[]);
-	const webhookPayload: IDataObject = {
-		url: webhookUrl,
-		name: webhookName,
-		subscriptions: selectedEvents,
-	};
-	const endpoint = getWebhookEndpoint.call(this);
-	const remoteWebhooks = await getRemoteWebhooks.call(this);
-
-	for (const webhook of remoteWebhooks.filter(
-		(remoteWebhook) => remoteWebhook.url === webhookUrl,
-	)) {
-		await chatwootApiRequest.call(this, 'DELETE', `${endpoint}/${webhook.id}`);
-	}
-
-	const response = (await chatwootApiRequest.call(
-		this,
-		'POST',
-		endpoint,
-		webhookPayload,
-	)) as IDataObject;
-
-	if (!response?.id) {
-		return false;
-	}
-
-	webhookData.webhookId = response.id;
-
-	return true;
-}
-
-function normalizeUrl(url: string | null | undefined): string {
-	return String(url ?? '')
-		.trim()
-		.replace(/\/+$/, '');
-}
-
-async function cleanupWebhooksByUrl(this: WebhookCleanupContext): Promise<void> {
-	const webhookUrl = this.getNodeWebhookUrl('default');
-	if (!webhookUrl) return;
-
-	const endpoint = getWebhookEndpoint.call(this);
-	const targetUrl = normalizeUrl(webhookUrl);
-	const remoteWebhooks = await getRemoteWebhooks.call(this);
-
-	for (const webhook of remoteWebhooks.filter(
-		(remoteWebhook) => normalizeUrl(remoteWebhook.url) === targetUrl,
-	)) {
-		try {
-			await chatwootApiRequest.call(this, 'DELETE', `${endpoint}/${webhook.id}`);
-		} catch (error) {
-			if (!isNotFoundError(error)) {
-				throw error;
-			}
-		}
-	}
-}
-
-async function deleteWebhook(this: IHookFunctions): Promise<boolean> {
-	const webhookData = this.getWorkflowStaticData('node');
-	const endpoint = getWebhookEndpoint.call(this);
-	const webhookId = webhookData.webhookId ? Number(webhookData.webhookId) : undefined;
-
-	if (webhookId) {
-		try {
-			await chatwootApiRequest.call(this, 'DELETE', `${endpoint}/${webhookId}`);
-		} catch (error) {
-			if (!isNotFoundError(error)) {
-				throw error;
-			}
+		if (selectedEvents.length > 0 && event && !selectedEvents.includes(event)) {
+			return { workflowData: [this.helpers.returnJsonArray([{ ignored: true, event }])] };
 		}
 
-		delete webhookData.webhookId;
+		if (Array.isArray(body)) {
+			return { workflowData: [this.helpers.returnJsonArray(body as IDataObject[])] };
+		}
+		if (body && typeof body === 'object') {
+			return { workflowData: [this.helpers.returnJsonArray([body as IDataObject])] };
+		}
+		return { workflowData: [this.helpers.returnJsonArray([{ error: 'No JSON body' }])] };
 	}
-
-	await cleanupWebhooksByUrl.call(this);
-
-	delete webhookData.webhookId;
-
-	return true;
 }
-
-export { checkExists, create, deleteWebhook };
