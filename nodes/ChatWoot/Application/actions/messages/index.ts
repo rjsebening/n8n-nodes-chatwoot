@@ -240,7 +240,7 @@ const properties: INodeProperties[] = [
 						property: 'content_attributes',
 						propertyInDotNotation: false,
 						type: 'body',
-						value: '={{ $value }}',
+						value: '={{ typeof $value === "string" ? JSON.parse($value) : $value }}',
 					},
 				},
 			},
@@ -330,8 +330,6 @@ const properties: INodeProperties[] = [
 				name: 'template_params',
 				type: 'json',
 				default: ` **Text with Image Header::** {
-					"content": "Hi your order 121212 is confirmed. Please wait for further updates",
-					"template_params": {
 					"name": "order_confirmation",
 					"category": "MARKETING",
 					"language": "en",
@@ -344,12 +342,9 @@ const properties: INodeProperties[] = [
 						"media_type": "image"
 						}
 					}
-					}
 				}
 					**Text with Copy Code Button:**
 				{
-					"content": "Special offer! Get 30% off your next purchase. Use the code below",
-					"template_params": {
 					"name": "discount_coupon",
 					"category": "MARKETING",
 					"language": "en",
@@ -364,7 +359,6 @@ const properties: INodeProperties[] = [
 						}
 						]
 					}
-					}
 				}`,
 				description: 'WhatsApp template parameters for sending structured messages',
 				routing: {
@@ -372,7 +366,7 @@ const properties: INodeProperties[] = [
 						property: 'template_params',
 						propertyInDotNotation: false,
 						type: 'body',
-						value: '={{ $value }}',
+						value: '={{ typeof $value === "string" ? JSON.parse($value) : $value }}',
 					},
 				},
 			},

@@ -13,18 +13,32 @@ type ApiItem = {
 	source_id?: string;
 	content?: string;
 	conversation_id?: string | number;
+	meta?: {
+		sender?: {
+			name?: string;
+			email?: string;
+			identifier?: string;
+			id?: string | number;
+		};
+	};
 	[key: string]: unknown;
 };
 
 function optionName(item: ApiItem): string {
+	const sender = item?.meta?.sender;
+
 	return String(
 		item?.name ??
+			sender?.name ??
 			item?.display_name ??
 			item?.title ??
 			item?.email ??
+			sender?.email ??
 			item?.identifier ??
+			sender?.identifier ??
 			item?.content ??
 			item?.id ??
+			sender?.id ??
 			item?.uuid ??
 			item?.conversation_id ??
 			'Unknown',
@@ -47,6 +61,10 @@ export function extractItems(response: unknown): ApiItem[] {
 	if (Array.isArray(response)) return response as ApiItem[];
 	if (response && typeof response === 'object') {
 		const obj = response as Record<string, unknown>;
+		if (obj.data && typeof obj.data === 'object') {
+			const dataItems = extractItems(obj.data);
+			if (dataItems.length > 0) return dataItems;
+		}
 		for (const key of [
 			'payload',
 			'data',

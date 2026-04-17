@@ -691,17 +691,65 @@ const properties: INodeProperties[] = [
 				},
 			},
 			{
-				displayName: 'Message',
-				name: 'message',
-				type: 'json',
+				displayName: 'Message Content',
+				name: 'message_content',
+				type: 'string',
 				default: '',
-				description: 'The initial message to be sent to the conversation',
+				description: 'Content of the initial message to send to the conversation',
+				typeOptions: {
+					rows: 4,
+				},
 				routing: {
 					send: {
-						property: 'message',
-						propertyInDotNotation: false,
+						property: 'message.content',
+						propertyInDotNotation: true,
 						type: 'body',
 						value: '={{ $value }}',
+					},
+				},
+			},
+			{
+				displayName: 'Message Template Params',
+				name: 'message_template_params',
+				type: 'json',
+				default: ` **Text with Image Header::** {
+					"name": "order_confirmation",
+					"category": "MARKETING",
+					"language": "en",
+					"processed_params": {
+						"body": {
+						"1": "121212"
+						},
+						"header": {
+						"media_url": "https://picsum.photos/200/300",
+						"media_type": "image"
+						}
+					}
+				}
+					**Text with Copy Code Button:**
+				{
+					"name": "discount_coupon",
+					"category": "MARKETING",
+					"language": "en",
+					"processed_params": {
+						"body": {
+						"discount_percentage": "30"
+						},
+						"buttons": [
+						{
+							"type": "copy_code",
+							"parameter": "SAVE20"
+						}
+						]
+					}
+				}`,
+				description: 'Template params for the initial message in case of WhatsApp channel',
+				routing: {
+					send: {
+						property: 'message.template_params',
+						propertyInDotNotation: true,
+						type: 'body',
+						value: '={{ typeof $value === "string" ? JSON.parse($value) : $value }}',
 					},
 				},
 			},
