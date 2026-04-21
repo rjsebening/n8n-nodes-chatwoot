@@ -105,20 +105,9 @@ const properties: INodeProperties[] = [
 			{
 				displayName: 'Custom Attributes',
 				name: 'custom_attributes',
-				type: 'resourceMapper',
-				default: {},
+				type: 'json',
+				default: '',
 				description: 'The custom attributes of the account',
-				typeOptions: {
-					resourceMapper: {
-						resourceMapperMethod: 'getCustomAttributeFields',
-						mode: 'add',
-						fieldWords: {
-							singular: 'Custom Attribute',
-							plural: 'Custom Attributes',
-						},
-						addAllFields: true,
-					},
-				},
 				routing: {
 					send: {
 						property: 'custom_attributes',
@@ -277,20 +266,9 @@ const properties: INodeProperties[] = [
 			{
 				displayName: 'Custom Attributes',
 				name: 'custom_attributes',
-				type: 'resourceMapper',
-				default: {},
+				type: 'json',
+				default: '',
 				description: 'The custom attributes of the account',
-				typeOptions: {
-					resourceMapper: {
-						resourceMapperMethod: 'getCustomAttributeFields',
-						mode: 'add',
-						fieldWords: {
-							singular: 'Custom Attribute',
-							plural: 'Custom Attributes',
-						},
-						addAllFields: true,
-					},
-				},
 				routing: {
 					send: {
 						property: 'custom_attributes',

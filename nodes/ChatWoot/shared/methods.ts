@@ -2,7 +2,10 @@ import { applicationLoadOptions } from '../methodes/Application/application.load
 import { clientLoadOptions } from '../methodes/Client/client.loadOptions';
 import { platformLoadOptions } from '../methodes/Platform/platform.loadOptions';
 
-export { getCustomAttributeFields } from '../methodes/Application/actions/custom-attributes/custom-attributes.resourceMapping';
+export {
+	getCustomAttributeFieldsConversation,
+	getCustomAttributeFieldsContact,
+} from '../methodes/Application/actions/custom-attributes/custom-attributes.resourceMapping';
 
 export const loadOptions = {
 	...applicationLoadOptions,

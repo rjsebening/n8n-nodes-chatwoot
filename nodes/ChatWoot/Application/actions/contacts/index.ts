@@ -298,7 +298,7 @@ const properties: INodeProperties[] = [
 					'An object where you can store custom attributes for contact. example {"type":"customer", "age":30}, this should have a valid custom attribute definition.',
 				typeOptions: {
 					resourceMapper: {
-						resourceMapperMethod: 'getCustomAttributeFields',
+						resourceMapperMethod: 'getCustomAttributeFieldsContact',
 						mode: 'add',
 						fieldWords: {
 							singular: 'Custom Attribute',
@@ -529,7 +529,7 @@ const properties: INodeProperties[] = [
 					'An object where you can store custom attributes for contact. example {"type":"customer", "age":30}, this should have a valid custom attribute definition.',
 				typeOptions: {
 					resourceMapper: {
-						resourceMapperMethod: 'getCustomAttributeFields',
+						resourceMapperMethod: 'getCustomAttributeFieldsContact',
 						mode: 'add',
 						fieldWords: {
 							singular: 'Custom Attribute',

@@ -1,18 +1,19 @@
 import type { ILoadOptionsFunctions, ResourceMapperFields } from 'n8n-workflow';
 import { extractItems, getParam } from '../../../shared/shared.loadOptions';
 
-export async function getCustomAttributeFields(
-	this: ILoadOptionsFunctions,
+async function loadCustomAttributeFields(
+	ctx: ILoadOptionsFunctions,
+	attributeModel: '0' | '1',
 ): Promise<ResourceMapperFields> {
-	const accountId = getParam(this, 'account_id') ?? 1;
-	const credentials = (await this.getCredentials('chatwootApplicationApi')) as Record<
+	const accountId = getParam(ctx, 'account_id') ?? 1;
+	const credentials = (await ctx.getCredentials('chatwootApplicationApi')) as Record<
 		string,
 		unknown
 	>;
 	const baseURL = String(credentials.url ?? '').replace(/\/$/, '');
 	try {
-		const response = await this.helpers.httpRequestWithAuthentication.call(
-			this,
+		const response = await ctx.helpers.httpRequestWithAuthentication.call(
+			ctx,
 			'chatwootApplicationApi',
 			{
 				method: 'GET',
@@ -21,7 +22,7 @@ export async function getCustomAttributeFields(
 					'/api/v1/accounts/' +
 					encodeURIComponent(String(accountId)) +
 					'/custom_attribute_definitions',
-				qs: { attribute_model: '0' },
+				qs: { attribute_model: attributeModel },
 				json: true,
 			},
 		);
@@ -40,4 +41,16 @@ export async function getCustomAttributeFields(
 	} catch {
 		return { fields: [] };
 	}
+}
+
+export async function getCustomAttributeFieldsConversation(
+	this: ILoadOptionsFunctions,
+): Promise<ResourceMapperFields> {
+	return loadCustomAttributeFields(this, '0');
+}
+
+export async function getCustomAttributeFieldsContact(
+	this: ILoadOptionsFunctions,
+): Promise<ResourceMapperFields> {
+	return loadCustomAttributeFields(this, '1');
 }

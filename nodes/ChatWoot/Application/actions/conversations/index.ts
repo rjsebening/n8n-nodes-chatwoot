@@ -672,7 +672,7 @@ const properties: INodeProperties[] = [
 					'The object to save custom attributes for conversation, accepts custom attributes key and value',
 				typeOptions: {
 					resourceMapper: {
-						resourceMapperMethod: 'getCustomAttributeFields',
+						resourceMapperMethod: 'getCustomAttributeFieldsConversation',
 						mode: 'add',
 						fieldWords: {
 							singular: 'Custom Attribute',
@@ -1332,7 +1332,7 @@ const properties: INodeProperties[] = [
 		description: 'The custom attributes to be set for the conversation',
 		typeOptions: {
 			resourceMapper: {
-				resourceMapperMethod: 'getCustomAttributeFields',
+				resourceMapperMethod: 'getCustomAttributeFieldsConversation',
 				mode: 'add',
 				fieldWords: {
 					singular: 'Custom Attribute',

@@ -36,7 +36,8 @@ export class ChatWootApplication implements INodeType {
 	methods = {
 		loadOptions: methods.loadOptions,
 		resourceMapping: {
-			getCustomAttributeFields: methods.getCustomAttributeFields,
+			getCustomAttributeFieldsConversation: methods.getCustomAttributeFieldsConversation,
+			getCustomAttributeFieldsContact: methods.getCustomAttributeFieldsContact,
 		},
 	};
 }

@@ -101,7 +101,7 @@ const properties: INodeProperties[] = [
 				description: 'Custom attributes of the customer',
 				typeOptions: {
 					resourceMapper: {
-						resourceMapperMethod: 'getCustomAttributeFields',
+						resourceMapperMethod: 'getCustomAttributeFieldsContact',
 						mode: 'add',
 						fieldWords: {
 							singular: 'Custom Attribute',
@@ -300,7 +300,7 @@ const properties: INodeProperties[] = [
 				description: 'Custom attributes of the customer',
 				typeOptions: {
 					resourceMapper: {
-						resourceMapperMethod: 'getCustomAttributeFields',
+						resourceMapperMethod: 'getCustomAttributeFieldsContact',
 						mode: 'add',
 						fieldWords: {
 							singular: 'Custom Attribute',
