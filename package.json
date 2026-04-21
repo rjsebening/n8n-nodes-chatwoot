@@ -1,6 +1,6 @@
 {
   "name": "@rjsebening/n8n-nodes-chatwoot",
-  "version": "0.0.7",
+  "version": "0.0.8",
   "description": "n8n node to connect with ChatWoot",
   "keywords": [
     "n8n-community-node-package",
