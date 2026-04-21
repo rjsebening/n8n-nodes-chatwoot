@@ -110,11 +110,11 @@ const properties: INodeProperties[] = [
 		description: 'Conversation_attribute(0)/contact_attribute(1)',
 		options: [
 			{
-				name: '0',
+				name: 'Conversation',
 				value: '0',
 			},
 			{
-				name: '1',
+				name: 'Contact',
 				value: '1',
 			},
 		],

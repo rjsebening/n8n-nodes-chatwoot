@@ -7,6 +7,7 @@ type ApiItem = {
 	uuid?: string;
 	name?: string;
 	display_name?: string;
+	attribute_display_name?: string;
 	title?: string;
 	email?: string;
 	identifier?: string;
@@ -28,7 +29,8 @@ function optionName(item: ApiItem): string {
 	const sender = item?.meta?.sender;
 
 	return String(
-		item?.name ??
+		item?.attribute_display_name ??
+			item?.name ??
 			sender?.name ??
 			item?.display_name ??
 			item?.title ??

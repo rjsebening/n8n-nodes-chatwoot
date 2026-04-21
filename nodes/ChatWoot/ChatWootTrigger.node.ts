@@ -254,8 +254,7 @@ function extractWebhookList(response: unknown): ChatWootWebhook[] {
 			if (
 				current.length === 0 ||
 				current.every(
-					(item) =>
-						item && typeof item === 'object' && 'id' in (item as Record<string, unknown>),
+					(item) => item && typeof item === 'object' && 'id' in (item as Record<string, unknown>),
 				)
 			) {
 				return current as ChatWootWebhook[];
@@ -409,9 +408,7 @@ export class ChatWootTrigger implements INodeType {
 				if (!webhookUrl) return false;
 
 				const webhookData = this.getWorkflowStaticData('node');
-				const selectedEvents = normalizeEvents(
-					this.getNodeParameter('events', []) as string[],
-				);
+				const selectedEvents = normalizeEvents(this.getNodeParameter('events', []) as string[]);
 				const targetUrl = normalizeUrl(webhookUrl);
 				const remoteWebhooks = await getRemoteWebhooks.call(this);
 				const storedId = webhookData.webhookId ? Number(webhookData.webhookId) : undefined;
@@ -442,13 +439,8 @@ export class ChatWootTrigger implements INodeType {
 				if (!webhookUrl) return false;
 
 				const webhookData = this.getWorkflowStaticData('node');
-				const webhookName = this.getNodeParameter(
-					'webhookName',
-					'n8n ChatWoot Trigger',
-				) as string;
-				const selectedEvents = normalizeEvents(
-					this.getNodeParameter('events', []) as string[],
-				);
+				const webhookName = this.getNodeParameter('webhookName', 'n8n ChatWoot Trigger') as string;
+				const selectedEvents = normalizeEvents(this.getNodeParameter('events', []) as string[]);
 				const endpoint = getWebhookEndpoint.call(this);
 
 				await deleteWebhooksByUrl.call(this);
@@ -468,9 +460,7 @@ export class ChatWootTrigger implements INodeType {
 			async delete(this: IHookFunctions): Promise<boolean> {
 				const webhookData = this.getWorkflowStaticData('node');
 				const endpoint = getWebhookEndpoint.call(this);
-				const webhookId = webhookData.webhookId
-					? Number(webhookData.webhookId)
-					: undefined;
+				const webhookId = webhookData.webhookId ? Number(webhookData.webhookId) : undefined;
 
 				if (webhookId) {
 					try {
@@ -495,9 +485,7 @@ export class ChatWootTrigger implements INodeType {
 	async webhook(this: IWebhookFunctions): Promise<IWebhookResponseData> {
 		const body = this.getBodyData() as unknown;
 		const selectedEvents = normalizeEvents(this.getNodeParameter('events', []) as string[]);
-		const event = String(
-			(body as IDataObject)?.event ?? (body as IDataObject)?.event_name ?? '',
-		);
+		const event = String((body as IDataObject)?.event ?? (body as IDataObject)?.event_name ?? '');
 
 		if (selectedEvents.length > 0 && event && !selectedEvents.includes(event)) {
 			return { workflowData: [this.helpers.returnJsonArray([{ ignored: true, event }])] };

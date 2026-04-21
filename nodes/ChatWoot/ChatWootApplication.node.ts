@@ -13,7 +13,7 @@ export class ChatWootApplication implements INodeType {
 		subtitle: '={{$parameter["operation"] + ": " + $parameter["resource"]}}',
 		description: 'Interact with ChatWoot Application APIs',
 		defaults: {
-			name: 'ChatWoot Application'
+			name: 'ChatWoot Application',
 		},
 		inputs: [NodeConnectionTypes.Main],
 		outputs: [NodeConnectionTypes.Main],
