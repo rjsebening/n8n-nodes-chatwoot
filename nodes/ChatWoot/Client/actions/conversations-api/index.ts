@@ -155,7 +155,7 @@ const properties: INodeProperties[] = [
 						property: 'custom_attributes',
 						propertyInDotNotation: false,
 						type: 'body',
-						value: '={{ $value }}',
+						value: '={{ $value.value }}',
 					},
 				},
 			},
