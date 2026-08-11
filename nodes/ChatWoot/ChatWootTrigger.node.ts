@@ -118,6 +118,18 @@ function isNotFoundError(error: unknown): boolean {
 	);
 }
 
+/**
+ * Webhook cleanup treats "already gone" as success. Anything else is a real
+ * failure and gets re-thrown as a node error so it surfaces in the UI.
+ */
+function rethrowUnlessNotFound(ctx: WebhookCleanupContext, error: unknown): void {
+	if (isNotFoundError(error)) return;
+
+	throw error instanceof NodeApiError || error instanceof NodeOperationError
+		? error
+		: new NodeApiError(ctx.getNode(), error as JsonObject);
+}
+
 function toJsonObject(
 	error: HttpRequestError,
 	statusCode?: string,
@@ -150,8 +162,11 @@ async function chatwootApiRequest(
 		throw new NodeOperationError(this.getNode(), 'Invalid ChatWoot URL in credentials');
 	}
 
+	// Only the transport call is wrapped: keeping the status-code check outside the
+	// try means its NodeApiError never has to be caught and re-thrown here.
+	let response: FullHttpResponse;
 	try {
-		const response = (await this.helpers.httpRequestWithAuthentication.call(
+		response = (await this.helpers.httpRequestWithAuthentication.call(
 			this,
 			'chatwootApplicationApi',
 			{
@@ -165,43 +180,7 @@ async function chatwootApiRequest(
 				returnFullResponse: true,
 			},
 		)) as FullHttpResponse;
-
-		const responseStatusCode = getFullResponseStatusCode(response);
-		const responseBody = getFullResponseBody(response);
-
-		if (responseStatusCode && responseStatusCode >= 400) {
-			const statusCode = String(responseStatusCode);
-			const responseDescription = stringifyForDescription(responseBody);
-			const requestDescription = body ? ` Request body: ${stringifyForDescription(body)}` : '';
-			const description = [
-				`ChatWoot request: ${method} ${endpoint}.`,
-				responseDescription ? `Response body: ${responseDescription}` : undefined,
-				requestDescription,
-			]
-				.filter(Boolean)
-				.join(' ');
-
-			this.logger.error(`ChatWoot trigger API request failed: ${method} ${endpoint}`, {
-				file: 'ChatWootTrigger.node.ts',
-				function: 'chatwootApiRequest',
-				statusCode,
-				endpoint,
-				method,
-				responseBody,
-				requestBody: body,
-			});
-
-			throw new NodeApiError(this.getNode(), toJsonObject({}, statusCode, responseBody), {
-				message: `ChatWoot API request failed: ${method} ${endpoint}`,
-				description,
-				httpCode: statusCode,
-			});
-		}
-
-		return responseBody as IDataObject | ChatWootWebhook[];
 	} catch (error) {
-		if (error instanceof NodeApiError) throw error;
-
 		const requestError = error as HttpRequestError;
 		const responseBody = getResponseBody(requestError);
 		const responseDescription = stringifyForDescription(responseBody);
@@ -231,6 +210,40 @@ async function chatwootApiRequest(
 			httpCode: statusCode,
 		});
 	}
+
+	const responseStatusCode = getFullResponseStatusCode(response);
+	const responseBody = getFullResponseBody(response);
+
+	if (responseStatusCode && responseStatusCode >= 400) {
+		const statusCode = String(responseStatusCode);
+		const responseDescription = stringifyForDescription(responseBody);
+		const requestDescription = body ? ` Request body: ${stringifyForDescription(body)}` : '';
+		const description = [
+			`ChatWoot request: ${method} ${endpoint}.`,
+			responseDescription ? `Response body: ${responseDescription}` : undefined,
+			requestDescription,
+		]
+			.filter(Boolean)
+			.join(' ');
+
+		this.logger.error(`ChatWoot trigger API request failed: ${method} ${endpoint}`, {
+			file: 'ChatWootTrigger.node.ts',
+			function: 'chatwootApiRequest',
+			statusCode,
+			endpoint,
+			method,
+			responseBody,
+			requestBody: body,
+		});
+
+		throw new NodeApiError(this.getNode(), toJsonObject({}, statusCode, responseBody), {
+			message: `ChatWoot API request failed: ${method} ${endpoint}`,
+			description,
+			httpCode: statusCode,
+		});
+	}
+
+	return responseBody as IDataObject | ChatWootWebhook[];
 }
 
 function getWebhookEndpoint(this: WebhookCleanupContext): string {
@@ -290,7 +303,7 @@ async function deleteWebhooksByUrl(this: WebhookCleanupContext): Promise<void> {
 		try {
 			await chatwootApiRequest.call(this, 'DELETE', `${endpoint}/${webhook.id}`);
 		} catch (error) {
-			if (!isNotFoundError(error)) throw error;
+			rethrowUnlessNotFound(this, error);
 		}
 	}
 }
@@ -304,6 +317,7 @@ export class ChatWootTrigger implements INodeType {
 		version: 1,
 		description:
 			'Starts the workflow when ChatWoot sends a webhook event to the generated webhook URL',
+		subtitle: '={{$parameter["events"]}}',
 		defaults: {
 			name: 'ChatWoot Trigger',
 		},
@@ -398,7 +412,6 @@ export class ChatWootTrigger implements INodeType {
 				],
 			},
 		],
-		usableAsTool: true,
 	};
 
 	webhookMethods = {
@@ -466,14 +479,14 @@ export class ChatWootTrigger implements INodeType {
 					try {
 						await chatwootApiRequest.call(this, 'DELETE', `${endpoint}/${webhookId}`);
 					} catch (error) {
-						if (!isNotFoundError(error)) throw error;
+						rethrowUnlessNotFound(this, error);
 					}
 				}
 
 				try {
 					await deleteWebhooksByUrl.call(this);
 				} catch (error) {
-					if (!isNotFoundError(error)) throw error;
+					rethrowUnlessNotFound(this, error);
 				}
 
 				delete webhookData.webhookId;

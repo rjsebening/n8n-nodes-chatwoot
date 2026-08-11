@@ -12,8 +12,8 @@ export class ChatWootPlatformApi implements ICredentialType {
 	displayName = 'ChatWoot Platform API';
 
 	icon: Icon = {
-		light: 'file:../nodes/ChatWoot/chatwoot.svg',
-		dark: 'file:../nodes/ChatWoot/chatwoot.dark.svg',
+		light: 'file:chatwoot.svg',
+		dark: 'file:chatwoot.dark.svg',
 	};
 
 	documentationUrl = 'https://developers.chatwoot.com/api-reference/introduction';
